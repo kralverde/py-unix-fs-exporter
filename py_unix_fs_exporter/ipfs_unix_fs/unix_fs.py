@@ -1,7 +1,7 @@
 import attr
 
-from enum import Enum, auto
-from typing import Optional, Sequence
+from enum import Enum
+from typing import Optional, List
 
 from . import unixfs_pb2 as pb2
 
@@ -42,7 +42,7 @@ class UnixFS:
     def __init__(self,
                  fs_type: FSType,
                  data: Optional[bytes],
-                 block_sizes: Sequence[int],
+                 block_sizes: List[int],
                  hash_type: Optional[int],
                  fanout: Optional[int],
                  m_time: Optional[MTime],
@@ -74,6 +74,12 @@ class UnixFS:
         total = sum(s for s in self.block_sizes)
         return len(self.data or b'') + total
     
+    def add_block_size(self, size: int):
+        self.block_sizes.append(size)
+
+    def remove_block_size(self, index: int):
+        self.block_sizes.pop(index)
+
     @classmethod
     def unmarshal(cls, marshaled: bytes) -> 'UnixFS':
         message = pb2.Data()
@@ -88,6 +94,7 @@ class UnixFS:
             message.mode
         )
 
-if __name__ == '__main__':
-    data = open('/home/work/workspace/py-unix-fs-exporter/tests/fixtures/raw.unixfs', 'rb').read()
-    UnixFS.unmarshal(data)
+    def marshal(self) -> bytes:
+        message = pb2.Data()
+        return message.SerializeToString()
+    
