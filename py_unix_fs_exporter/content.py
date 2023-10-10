@@ -1,10 +1,12 @@
-from typing import Mapping, Union, List, Sequence, Callable
+from typing import Mapping, Union, List, Sequence, Callable, TYPE_CHECKING
 
 from multiformats import CID, multicodec
 
 from .ipfs_dag_pb.dag_pb import PBNode, decode_pbnode
 from .ipfs_unix_fs.unix_fs import UnixFS, FSType
-from .resolvers import resolve, ResolveResult
+
+if TYPE_CHECKING:
+    from .resolvers import Resolver, ResolveResult
 
 def _walk_dag(block_from_encoded_cid: Mapping[str, bytes], node: Union[PBNode, bytes], queue: List[int]):
     if isinstance(node, bytes):
@@ -24,7 +26,7 @@ def _walk_dag(block_from_encoded_cid: Mapping[str, bytes], node: Union[PBNode, b
             raise IndexError()
         _walk_dag(block_from_encoded_cid, child, queue)
 
-def file_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> Sequence[bytes]:
+def file_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: Resolver) -> Sequence[bytes]:
     file_size = unix_fs.file_size()
     assert file_size
 
@@ -32,17 +34,17 @@ def file_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int,
     _walk_dag(block_from_encoded_cid, node, queue)
     return queue
 
-def directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> Sequence[ResolveResult]:
+def directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: Resolver) -> Sequence[ResolveResult]:
     results = []
     for link in node.links:
         link_name = link.name or ''
         link_path = f'{path}/{link_name}'
-        result = resolve(link.hash, link_name, link_path, [], depth + 1, block_from_encoded_cid)
+        result = resolver(link.hash, link_name, link_path, [], depth + 1, block_from_encoded_cid)
         if result:
             results.append(result)
     return results
 
-def _list_hamt_directory(node: PBNode, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> Sequence[ResolveResult]:
+def _list_hamt_directory(node: PBNode, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: Resolver) -> Sequence[ResolveResult]:
     assert node.data
     unix_fs = UnixFS.unmarshal(node.data)
     assert unix_fs.fanout
@@ -52,7 +54,7 @@ def _list_hamt_directory(node: PBNode, path: str, depth: int, block_from_encoded
     for link in node.links:
         name = link.name[pad_length:] if link.name is not None else None
         if name is not None and name != '':
-            result = resolve(link.hash, name, f'{path}/{name}', [], depth + 1, block_from_encoded_cid)
+            result = resolver(link.hash, name, f'{path}/{name}', [], depth + 1, block_from_encoded_cid)
             results.append(result)
         else:
             block = block_from_encoded_cid[link.hash.encode()]
@@ -60,14 +62,14 @@ def _list_hamt_directory(node: PBNode, path: str, depth: int, block_from_encoded
             results.extend(_list_hamt_directory(node, path, depth, block_from_encoded_cid))
     return results
 
-def hamt_sharded_directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes]):
-    return _list_hamt_directory(node, path, depth, block_from_encoded_cid)
+def hamt_sharded_directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: Resolver):
+    return _list_hamt_directory(node, path, depth, block_from_encoded_cid, resolver)
 
 def _null(*args):
     return []
 
 ExportedContent = Sequence[Union[bytes, ResolveResult]]
-ContentExporter = Callable[[CID, PBNode, UnixFS, str, int, Mapping[str, bytes]], ExportedContent]
+ContentExporter = Callable[[CID, PBNode, UnixFS, str, int, Mapping[str, bytes], Resolver], ExportedContent]
 CONTENT_EXPORTERS = dict[FSType, ContentExporter]({
     FSType.RAW: file_content,
     FSType.FILE: file_content,

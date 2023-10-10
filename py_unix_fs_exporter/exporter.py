@@ -2,9 +2,9 @@ from typing import Union, Sequence, Mapping, Tuple
 
 import re
 
-from multiformats import CID, multicodec
+from multiformats import CID
 
-from .resolvers import Exportable, resolve, UnixFSDirectory, ExportableType
+from .resolvers import resolve, UnixFSDirectory, ExportableType
 
 def _to_path_components(path: str) -> Sequence[str]:
     return filter(bool, re.findall(r'(?:[^\\^/]|\\\/)+', ''.join(path.split())))
