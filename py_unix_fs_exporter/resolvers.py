@@ -12,7 +12,6 @@ from multiformats import CID, multicodec
 from hamt_sharding import create_HAMT
 from hamt_sharding.buckets import Bucket, BucketPosition
 
-from .content import CONTENT_EXPORTERS
 from .ipfs_unix_fs.unix_fs import UnixFS, FSType
 from .ipfs_dag_pb.dag_pb import PBNode, PBLink, decode_pbnode
 
@@ -315,7 +314,8 @@ class UnixFSResolver(Resolver):
                 next_path,
                 to_resolve[1:],
             )
-        
+
+        from .content import CONTENT_EXPORTERS
         content = CONTENT_EXPORTERS[unix_fs.fs_type](cid, node, unix_fs, path, depth, block_from_encoded_cid)
         assert content is not None
         if unix_fs.is_dir():
