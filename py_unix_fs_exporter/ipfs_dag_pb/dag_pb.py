@@ -4,7 +4,7 @@ from typing import Optional, Sequence
 
 from multiformats import CID
 
-import dag_pb_pb2 as pb2
+from . import dag_pb_pb2 as pb2
 
 class DAGPBFormatException(Exception): pass
 
