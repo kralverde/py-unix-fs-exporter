@@ -321,5 +321,5 @@ CONTENT_RESOLVERS = dict[int, Resolver]({
 })
 
 def resolve(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
-    resolver = CONTENT_RESOLVERS[cid.codec]
+    resolver = CONTENT_RESOLVERS[cid.codec.code]
     return resolver(cid, name, path, to_resolve, depth, block_from_encoded_cid)    
