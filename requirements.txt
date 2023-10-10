@@ -1,6 +1,1 @@
-multiformats==0.2.1
-mmh3==4.0.1
-protobuf>=3.20,<4
-attrs>=23.0.0 
-dag-cbor==0.3.2 
-py-hamt-sharding @ git+https://github.com/kralverde/py-hamt-sharding@786ce1da8e84f918ed6092f85733ef56ca783da7
+.
