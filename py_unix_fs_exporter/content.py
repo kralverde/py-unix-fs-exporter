@@ -18,9 +18,9 @@ def _walk_dag(block_from_encoded_cid: Mapping[str, bytes], node: Union[PBNode, b
         queue.append(file.data)
     for link in node.links:
         block = block_from_encoded_cid[link.hash.encode()]
-        if link.hash.codec == multicodec.get('dag-pb').code:
+        if link.hash.codec.code == multicodec.get('dag-pb').code:
             child = decode_pbnode(block)
-        elif link.hash.codec == multicodec.get('raw').code:
+        elif link.hash.codec.code == multicodec.get('raw').code:
             child = block
         else:
             raise IndexError()
