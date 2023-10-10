@@ -252,7 +252,7 @@ def _find_shard_cid(node: PBNode, name: str, block_from_encoded_cid: Mapping[str
     decode_pbnode(block)
     return _find_shard_cid(node, name, block_from_encoded_cid, context)
 
-def resolve_dag_pb(cls, cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
+def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
     block = block_from_encoded_cid[cid.encode()]
     node = decode_pbnode(block)
     assert node.data
