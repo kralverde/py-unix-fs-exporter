@@ -3,7 +3,7 @@ import attr
 from enum import Enum, auto
 from typing import Optional, Sequence
 
-import unixfs_pb2 as pb2
+from . import unixfs_pb2 as pb2
 
 @attr.s(slots=True)
 class MTime:
