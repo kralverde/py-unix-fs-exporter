@@ -283,7 +283,7 @@ def resolve_dag_pb(cls, cid: CID, name: str, path: str, to_resolve: Sequence[str
             to_resolve[1:],
         )
 
-    content = CONTENT_EXPORTERS[unix_fs.fs_type](cid, node, unix_fs, path, depth, block_from_encoded_cid)
+    content = CONTENT_EXPORTERS[unix_fs.fs_type](cid, node, unix_fs, path, depth, block_from_encoded_cid, resolve)
     assert content is not None
     if unix_fs.is_dir():
         return ResolveResult(
