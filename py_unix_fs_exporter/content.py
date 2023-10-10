@@ -26,7 +26,7 @@ def _walk_dag(block_from_encoded_cid: Mapping[str, bytes], node: Union[PBNode, b
             raise IndexError()
         _walk_dag(block_from_encoded_cid, child, queue)
 
-def file_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: Resolver) -> Sequence[bytes]:
+def file_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: 'Resolver') -> Sequence[bytes]:
     file_size = unix_fs.file_size()
     assert file_size
 
@@ -34,7 +34,7 @@ def file_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int,
     _walk_dag(block_from_encoded_cid, node, queue)
     return queue
 
-def directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: Resolver) -> Sequence[ResolveResult]:
+def directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: 'Resolver') -> Sequence['ResolveResult']:
     results = []
     for link in node.links:
         link_name = link.name or ''
@@ -44,7 +44,7 @@ def directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth:
             results.append(result)
     return results
 
-def _list_hamt_directory(node: PBNode, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: Resolver) -> Sequence[ResolveResult]:
+def _list_hamt_directory(node: PBNode, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: 'Resolver') -> Sequence['ResolveResult']:
     assert node.data
     unix_fs = UnixFS.unmarshal(node.data)
     assert unix_fs.fanout
@@ -62,14 +62,14 @@ def _list_hamt_directory(node: PBNode, path: str, depth: int, block_from_encoded
             results.extend(_list_hamt_directory(node, path, depth, block_from_encoded_cid))
     return results
 
-def hamt_sharded_directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: Resolver):
+def hamt_sharded_directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_from_encoded_cid: Mapping[str, bytes], resolver: 'Resolver'):
     return _list_hamt_directory(node, path, depth, block_from_encoded_cid, resolver)
 
 def _null(*args):
     return []
 
-ExportedContent = Sequence[Union[bytes, ResolveResult]]
-ContentExporter = Callable[[CID, PBNode, UnixFS, str, int, Mapping[str, bytes], Resolver], ExportedContent]
+ExportedContent = Sequence[Union[bytes, 'ResolveResult']]
+ContentExporter = Callable[[CID, PBNode, UnixFS, str, int, Mapping[str, bytes], 'Resolver'], ExportedContent]
 CONTENT_EXPORTERS = dict[FSType, ContentExporter]({
     FSType.RAW: file_content,
     FSType.FILE: file_content,
