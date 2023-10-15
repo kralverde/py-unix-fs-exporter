@@ -1,9 +1,9 @@
 import attr
 
-from abc import ABC
+from abc import ABC, abstractmethod
 from enum import Enum, auto
 from math import log2
-from typing import Generic, TypeVar, Sequence, Union, Optional, Mapping, Callable, Iterable
+from typing import Generic, TypeVar, Sequence, Union, Optional, Mapping, Callable, AsyncIterator, Awaitable
 
 import dag_cbor
 from multiformats import CID, multicodec, multihash
@@ -11,13 +11,18 @@ from multiformats import CID, multicodec, multihash
 from hamt_sharding import HAMTBucket
 from hamt_sharding.buckets import HAMTBucketPosition
 
-from .content import CONTENT_EXPORTERS, ExportedContent
+from .content import _CONTENT_EXPORTERS, ExportedContent
 from .ipfs_unix_fs.unix_fs import UnixFS, FSType, UnixFSFormatException
 from .ipfs_dag_pb.dag_pb import PBNode, PBLink, DAGPBFormatException
 
 T = TypeVar('T')
 
 class ResolveException(Exception): pass
+
+class BlockStore(ABC):
+    @abstractmethod
+    async def get_block(self, cid: CID) -> bytes:
+        pass
 
 class ExportableType(Enum):
     FILE = auto()
@@ -35,7 +40,7 @@ class Exportable(ABC, Generic[T]):
                  depth: int,
                  size: int,
                  node: Union[PBNode, bytes],
-                 content: Iterable[T]):
+                 content: AsyncIterator[T]):
         self.exportable_type = exportable_type
         self.name = name
         self.path = path
@@ -96,12 +101,12 @@ class ResolveResult:
     entry: Exportable
     next: Optional[NextResult]
     
-Resolver = Callable[[CID, str, str, Sequence[str], int, Mapping[str, bytes]], ResolveResult]
+Resolver = Callable[[CID, str, str, Sequence[str], int, BlockStore], Awaitable[ResolveResult]]
 
-def resolve_raw(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
+async def resolve_raw(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_store: BlockStore) -> ResolveResult:
     if len(to_resolve) > 0:
         raise ResolveException(f'no link named {path} found in raw node {cid}')
-    block = block_from_encoded_cid[bytes(cid)]
+    block = await block_store.get_block(cid)
     return ResolveResult(
         entry=RawNode(
             node=block,
@@ -115,10 +120,10 @@ def resolve_raw(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth
         next=None
     )
         
-def resolve_identity(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
+async def resolve_identity(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_store: BlockStore) -> ResolveResult:
     if len(to_resolve) > 0:
         raise ResolveException(f'no link named {path} found in identity node {cid}')
-    block = block_from_encoded_cid[bytes(cid)]
+    block = await block_store.get_block(cid)
     return ResolveResult(
         entry=IdentityNode(
             node=block,
@@ -132,8 +137,8 @@ def resolve_identity(cid: CID, name: str, path: str, to_resolve: Sequence[str], 
         next=None
     )
 
-def resolve_dag_cbor(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
-    block = block_from_encoded_cid[bytes(cid)]
+async def resolve_dag_cbor(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_store: BlockStore) -> ResolveResult:
+    block = await block_store.get_block(cid)
     obj = dag_cbor.decode(block)
     sub_obj = obj
     sub_path = path
@@ -208,7 +213,7 @@ def _to_bucket_path(position: HAMTBucketPosition[str, bool]) -> Sequence[HAMTBuc
     path.append(bucket)
     return path[::-1]
 
-def _find_shard_cid(node: PBNode, name: str, block_from_encoded_cid: Mapping[str, bytes], context: Optional[_ShardTraversalContext] = None) -> CID:
+async def _find_shard_cid(node: PBNode, name: str, block_store: BlockStore, context: Optional[_ShardTraversalContext] = None) -> CID:
     if context is None:
         if not node.data:
             raise ResolveException('no data in shard node')
@@ -257,12 +262,12 @@ def _find_shard_cid(node: PBNode, name: str, block_from_encoded_cid: Mapping[str
         return link.cid
     
     context.hamt_depth += 1
-    block = block_from_encoded_cid[bytes(link.cid)]
+    block = await block_store.get_block(link.cid)
     node = PBNode.decode(block)
-    return _find_shard_cid(node, name, block_from_encoded_cid, context)
+    return _find_shard_cid(node, name, block_store, context)
 
-def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
-    block = block_from_encoded_cid[bytes(cid)]
+async def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_store: BlockStore) -> ResolveResult:
+    block = await block_store.get_block(cid)
     node = PBNode.decode(block)
 
     name = name or cid.encode()
@@ -273,7 +278,7 @@ def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[str], de
 
     if len(to_resolve) > 0:
         if unix_fs.fs_type == FSType.HAMTSHARD:
-            link_cid = _find_shard_cid(node, to_resolve[0], block_from_encoded_cid)
+            link_cid = await _find_shard_cid(node, to_resolve[0], block_store)
         else:
             link_cid = None
             link = next(filter(lambda x: x.name == name, node.links), None)
@@ -292,7 +297,7 @@ def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[str], de
             to_resolve[1:],
         )
 
-    content = CONTENT_EXPORTERS[unix_fs.fs_type](cid, node, unix_fs, path, depth, block_from_encoded_cid, resolve)
+    content = _CONTENT_EXPORTERS[unix_fs.fs_type](cid, node, unix_fs, path, depth, block_store, resolve)
     if unix_fs.is_dir():
         return ResolveResult(
             UnixFSDirectory(
@@ -321,13 +326,12 @@ def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[str], de
         next_result
     )
 
-CONTENT_RESOLVERS: Mapping[int, Resolver] = {
+_CONTENT_RESOLVERS: Mapping[int, Resolver] = {
     multicodec.get('dag-pb').code: resolve_dag_pb,
     multicodec.get('raw').code: resolve_raw,
     multicodec.get('dag-cbor').code: resolve_dag_cbor,
     multicodec.get('identity').code: resolve_identity
 }
 
-def resolve(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
-    resolver = CONTENT_RESOLVERS[cid.codec.code]
-    return resolver(cid, name, path, to_resolve, depth, block_from_encoded_cid)    
+async def resolve(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
+    return await _CONTENT_RESOLVERS[cid.codec.code](cid, name, path, to_resolve, depth, block_from_encoded_cid)    

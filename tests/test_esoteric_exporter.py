@@ -1,8 +1,10 @@
+import asyncio
 from random import randint
 
 from multiformats import CID, multicodec, multihash
 
 from py_unix_fs_exporter.exporter import exporter, ExportableType
+from py_unix_fs_exporter.resolvers import BlockStore
 from py_unix_fs_exporter.content import ContentExtractionException
 from py_unix_fs_exporter.ipfs_dag_pb.dag_pb import PBNode, PBLink
 from py_unix_fs_exporter.ipfs_unix_fs.unix_fs import UnixFS, FSType
@@ -11,14 +13,22 @@ from py_unix_fs_exporter.ipfs_unix_fs.unix_fs import UnixFS, FSType
 def randbytes(l: int) -> bytes:
     return bytes([randint(0, 0xff) for _ in range(l)])
 
+class MappingBlockStore(BlockStore):
+    def __init__(self, mapping) -> None:
+        self.mapping = mapping
+
+    async def get_block(self, cid: CID) -> bytes:
+        return self.mapping[bytes(cid)]
+
 def test_unbalanced_dag():
-    block_store = {}
+    mapping = {}
+    bs = MappingBlockStore(mapping)
 
     def store_block(buf: bytes, codec: int) -> CID:
         mh = multihash.get('sha2-256').digest(buf)
         cid = CID('base32', 1, codec, mh)
         assert cid.hashfun.code == multihash.get('sha2-256').code
-        block_store[bytes(cid)] = buf
+        mapping[bytes(cid)] = buf
         return cid
 
     raw_blocks = [
@@ -127,19 +137,24 @@ def test_unbalanced_dag():
     root_buf = root_node.encode()
     root_cid = store_block(root_buf, multicodec.get('dag-pb').code)
 
-    exported = exporter(root_cid, block_store)
+    exported = asyncio.run(exporter(root_cid, bs))
     assert exported.exportable_type == ExportableType.FILE
-    data = b''.join(exported.content)
-    assert data == b''.join(raw_blocks)
+    async def test():
+        chunks = b''
+        async for content in exported.content:
+            chunks += content
+        assert chunks == b''.join(raw_blocks)
+    asyncio.run(test())
 
 def test_deep_dag():
-    block_store = {}
+    mapping = {}
+    bs = MappingBlockStore(mapping)
 
     def store_block(buf: bytes, codec: int) -> CID:
         mh = multihash.get('sha2-256').digest(buf)
         cid = CID('base32', 1, codec, mh)
         assert cid.hashfun.code == multihash.get('sha2-256').code
-        block_store[bytes(cid)] = buf
+        mapping[bytes(cid)] = buf
         return cid
 
     original_buf = randbytes(5)
@@ -164,18 +179,24 @@ def test_deep_dag():
         buf = parent.encode()
         child_cid = store_block(buf, multicodec.get('dag-pb').code)
 
-    exported = exporter(child_cid, block_store)
+    exported = asyncio.run(exporter(child_cid, bs))
     assert exported.exportable_type == ExportableType.FILE
-    assert b''.join(exported.content) == original_buf
+    async def test():
+        chunks = b''
+        async for content in exported.content:
+            chunks += content
+        assert chunks == original_buf
+    asyncio.run(test())
 
 def test_error_on_too_large_block_sizes():
-    block_store = {}
+    mapping = {}
+    bs = MappingBlockStore(mapping)
 
     def store_block(buf: bytes, codec: int) -> CID:
         mh = multihash.get('sha2-256').digest(buf)
         cid = CID('base32', 1, codec, mh)
         assert cid.hashfun.code == multihash.get('sha2-256').code
-        block_store[bytes(cid)] = buf
+        mapping[bytes(cid)] = buf
         return cid
 
     raw_blocks = [
@@ -216,24 +237,28 @@ def test_error_on_too_large_block_sizes():
     )
     root_buf = root_node.encode()
     root_cid = store_block(root_buf, multicodec.get('dag-pb').code)
-    exported = exporter(root_cid, block_store)
+    exported = asyncio.run(exporter(root_cid, bs))
 
     assert exported.exportable_type == ExportableType.FILE
+    async def iter_all():
+        async for _ in exported.content:
+            pass
     try:
-        [_ for _ in exported.content]
+        asyncio.run(iter_all())
     except ContentExtractionException:
         pass
     else:
         assert False
 
 def test_error_on_too_small_block_sizes():
-    block_store = {}
+    mapping = {}
+    bs = MappingBlockStore(mapping)
 
     def store_block(buf: bytes, codec: int) -> CID:
         mh = multihash.get('sha2-256').digest(buf)
         cid = CID('base32', 1, codec, mh)
         assert cid.hashfun.code == multihash.get('sha2-256').code
-        block_store[bytes(cid)] = buf
+        mapping[bytes(cid)] = buf
         return cid
 
     raw_blocks = [
@@ -274,24 +299,29 @@ def test_error_on_too_small_block_sizes():
     )
     root_buf = root_node.encode()
     root_cid = store_block(root_buf, multicodec.get('dag-pb').code)
-    exported = exporter(root_cid, block_store)
+    exported = asyncio.run(exporter(root_cid, bs))
 
     assert exported.exportable_type == ExportableType.FILE
+    async def iter_all():
+        async for _ in exported.content:
+            pass
     try:
-        [_ for _ in exported.content]
+        asyncio.run(iter_all())
     except ContentExtractionException:
         pass
     else:
         assert False
 
+
 def test_error_on_wrong_number_block_sizes():
-    block_store = {}
+    mapping = {}
+    bs = MappingBlockStore(mapping)
 
     def store_block(buf: bytes, codec: int) -> CID:
         mh = multihash.get('sha2-256').digest(buf)
         cid = CID('base32', 1, codec, mh)
         assert cid.hashfun.code == multihash.get('sha2-256').code
-        block_store[bytes(cid)] = buf
+        mapping[bytes(cid)] = buf
         return cid
 
     raw_blocks = [
@@ -332,11 +362,14 @@ def test_error_on_wrong_number_block_sizes():
     )
     root_buf = root_node.encode()
     root_cid = store_block(root_buf, multicodec.get('dag-pb').code)
-    exported = exporter(root_cid, block_store)
+    exported = asyncio.run(exporter(root_cid, bs))
 
     assert exported.exportable_type == ExportableType.FILE
+    async def iter_all():
+        async for _ in exported.content:
+            pass
     try:
-        [_ for _ in exported.content]
+        asyncio.run(iter_all())
     except ContentExtractionException:
         pass
     else:
