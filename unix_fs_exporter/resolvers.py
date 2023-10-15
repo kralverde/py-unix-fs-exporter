@@ -3,7 +3,7 @@ import attr
 from abc import ABC, abstractmethod
 from enum import Enum, auto
 from math import log2
-from typing import Generic, TypeVar, Sequence, Union, Optional, Mapping, Callable, AsyncIterator, Awaitable
+from typing import Generic, TypeVar, Sequence, Union, Optional, Mapping, Callable, AsyncIterable, Awaitable, Any
 
 import dag_cbor
 from multiformats import CID, multicodec, multihash
@@ -24,6 +24,10 @@ class BlockStore(ABC):
     async def get_block(self, cid: CID) -> bytes:
         pass
 
+async def _iterable_to_async_iterable(x: Sequence[T]) -> AsyncIterable[T]:
+    for y in x:
+        yield y
+
 class ExportableType(Enum):
     FILE = auto()
     DIRECTORY = auto()
@@ -40,7 +44,7 @@ class Exportable(ABC, Generic[T]):
                  depth: int,
                  size: int,
                  node: Union[PBNode, bytes],
-                 content: AsyncIterator[T]):
+                 content: AsyncIterable[T]):
         self.exportable_type = exportable_type
         self.name = name
         self.path = path
@@ -54,39 +58,81 @@ class FSExportable(Exportable[T]):
     def __init__(self, exportable_type: ExportableType,
                  unix_fs: UnixFS,
                  node: PBNode,
-                 name, path, cid, depth, size, content):
+                 name: str,
+                 path: str,
+                 cid: CID,
+                 depth: int,
+                 size: int,
+                 content: AsyncIterable[T]):
         Exportable.__init__(self, exportable_type, name, path, cid, depth, size, node, content)
         self.unix_fs = unix_fs
 
 class UnixFSFile(FSExportable[bytes]):
     def __init__(self,
-                 unix_fs, node, name, path, cid, depth, size, content):
+                 unix_fs: UnixFS,
+                 node: PBNode,
+                 name: str,
+                 path: str,
+                 cid: CID,
+                 depth: int,
+                 size: int,
+                 content: AsyncIterable[bytes]):
         FSExportable.__init__(self, ExportableType.FILE, unix_fs, node, name, path, cid, depth, size, content)
 
 class UnixFSDirectory(FSExportable[ExportedContent]):
     def __init__(self,
-                 unix_fs, node, name, path, cid, depth, size, content):
+                 unix_fs: UnixFS,
+                 node: PBNode,
+                 name: str,
+                 path: str,
+                 cid: CID,
+                 depth: int,
+                 size: int,
+                 content: AsyncIterable[ExportedContent]):
         FSExportable.__init__(self, ExportableType.DIRECTORY, unix_fs, node, name, path, cid, depth, size, content)
 
 class BinaryExportable(FSExportable[T]):
     def __init__(self, exportable_type: ExportableType,
                  node: bytes,
-                 name, path, cid, depth, size, content):
+                 name: str,
+                 path: str,
+                 cid: CID,
+                 depth: int,
+                 size: int,
+                 content: AsyncIterable[T]):
         Exportable.__init__(self, exportable_type, name, path, cid, depth, size, node, content)
 
 class ObjectNode(BinaryExportable[object]):
     def __init__(self,
-                 node, name, path, cid, depth, size, content):
+                 node: bytes,
+                 name: str,
+                 path: str,
+                 cid: CID,
+                 depth: int,
+                 size: int,
+                 content: AsyncIterable[object]):
         BinaryExportable.__init__(self, ExportableType.OBJECT, node, name, path, cid, depth, size, content)
 
 class RawNode(BinaryExportable[bytes]):
     def __init__(self,
-                 node, name, path, cid, depth, size, content):
+                 node: bytes,
+                 name: str,
+                 path: str,
+                 cid: CID,
+                 depth: int,
+                 size: int,
+                 content: AsyncIterable[bytes]):
         BinaryExportable.__init__(self, ExportableType.RAW, node, name, path, cid, depth, size, content)
 
 class IdentityNode(BinaryExportable[bytes]):
     def __init__(self,
-                 node, name, path, cid, depth, size, content):
+                 node: bytes,
+                 name: str,
+                 path: str,
+                 cid: CID,
+                 depth: int,
+                 size: int,
+                 content: AsyncIterable[bytes]):
         BinaryExportable.__init__(self, ExportableType.IDENTITY, node, name, path, cid, depth, size, content)
 
 @attr.define(slots=True)
@@ -97,8 +143,8 @@ class NextResult:
     to_resolve: Sequence[str]
 
 @attr.define(slots=True)
-class ResolveResult:
-    entry: Exportable
+class ResolveResult():
+    entry: Exportable[Any]
     next: Optional[NextResult]
     
 Resolver = Callable[[CID, str, str, Sequence[str], int, BlockStore], Awaitable[ResolveResult]]
@@ -115,7 +161,7 @@ async def resolve_raw(cid: CID, name: str, path: str, to_resolve: Sequence[str],
             cid=cid,
             depth=depth,
             size=len(block),
-            content=[block]
+            content=_iterable_to_async_iterable([block])
         ),
         next=None
     )
@@ -132,7 +178,7 @@ async def resolve_identity(cid: CID, name: str, path: str, to_resolve: Sequence[
             cid=cid,
             depth=depth,
             size=len(block),
-            content=[block]
+            content=_iterable_to_async_iterable([block])
         ),
         next=None
     )
@@ -145,9 +191,15 @@ async def resolve_dag_cbor(cid: CID, name: str, path: str, to_resolve: Sequence[
 
     while len(to_resolve) > 0:
         prop = to_resolve[0]
+        assert isinstance(sub_obj, Mapping)
         if prop in sub_obj:
             sub_path = f'{sub_path}/{prop}'
-            sub_obj_cid = CID.decode(sub_obj[prop]) if prop in sub_obj else None
+            if prop not in sub_obj:
+                sub_obj_cid = None
+            else:
+                raw_cid = sub_obj[prop]
+                assert isinstance(raw_cid, (bytes, str))
+                sub_obj_cid = CID.decode(raw_cid)
             if sub_obj_cid is not None:
                 return ResolveResult(
                     entry=ObjectNode(
@@ -157,7 +209,7 @@ async def resolve_dag_cbor(cid: CID, name: str, path: str, to_resolve: Sequence[
                         cid,
                         depth,
                         len(block),
-                        [obj],
+                        _iterable_to_async_iterable([obj]),
                     ),
                     next=NextResult(
                         cid=sub_obj_cid,
@@ -178,7 +230,7 @@ async def resolve_dag_cbor(cid: CID, name: str, path: str, to_resolve: Sequence[
             cid,
             depth,
             len(block),
-            [obj],
+            _iterable_to_async_iterable([obj]),
         ),
         next=None
     )
@@ -189,10 +241,10 @@ class _ShardTraversalContext:
     root_bucket: HAMTBucket[str, bool]
     last_bucket: HAMTBucket[str, bool]
 
-def _pad_length(bucket: HAMTBucket[str, bool]):
+def _pad_length(bucket: HAMTBucket[str, bool]) -> int:
     return len(hex(bucket.table_size - 1)[2:])
 
-def _add_links_to_hamt_bucket(links: Sequence[PBLink], bucket: HAMTBucket[str, bool], root_bucket: HAMTBucket[str, bool]):
+def _add_links_to_hamt_bucket(links: Sequence[PBLink], bucket: HAMTBucket[str, bool], root_bucket: HAMTBucket[str, bool]) -> None:
     pad_length = _pad_length(bucket)
     for link in links:
         if len(link.name) == pad_length:
@@ -213,7 +265,7 @@ def _to_bucket_path(position: HAMTBucketPosition[str, bool]) -> Sequence[HAMTBuc
     path.append(bucket)
     return path[::-1]
 
-async def _find_shard_cid(node: PBNode, name: str, block_store: BlockStore, context: Optional[_ShardTraversalContext] = None) -> CID:
+async def _find_shard_cid(node: PBNode, name: str, block_store: BlockStore, context: Optional[_ShardTraversalContext] = None) -> Optional[CID]:
     if context is None:
         if not node.data:
             raise ResolveException('no data in shard node')
@@ -223,7 +275,7 @@ async def _find_shard_cid(node: PBNode, name: str, block_store: BlockStore, cont
         if unix_fs.fanout == 0:
             raise ResolveException('not a valid fanout')
 
-        def _hash_fn(buf: bytes):
+        def _hash_fn(buf: bytes) -> bytes:
             # TODO: Remove this once multihash gets fixed
             if unix_fs.hash_type == 0x22:
                 from multiformats.multihash._hashfuns.murmur3 import _murmur3
@@ -247,7 +299,7 @@ async def _find_shard_cid(node: PBNode, name: str, block_store: BlockStore, cont
         context.last_bucket = bucket_path[context.hamt_depth]
         prefix = _to_prefix(context.last_bucket._pos_at_parent, pad_length)
 
-    def predicate(link: PBLink):
+    def predicate(link: PBLink) -> bool:
         entry_prefix = link.name[:pad_length]
         entry_name = link.name[pad_length:]
         if entry_prefix != prefix:
@@ -264,7 +316,7 @@ async def _find_shard_cid(node: PBNode, name: str, block_store: BlockStore, cont
     context.hamt_depth += 1
     block = await block_store.get_block(link.cid)
     node = PBNode.decode(block)
-    return _find_shard_cid(node, name, block_store, context)
+    return await _find_shard_cid(node, name, block_store, context)
 
 async def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_store: BlockStore) -> ResolveResult:
     block = await block_store.get_block(cid)
@@ -312,6 +364,12 @@ async def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[st
             ),
             next_result
         )
+    
+    async def validate_file_results(content: AsyncIterable[ExportedContent]) -> AsyncIterable[bytes]:
+        async for block in content:
+            assert isinstance(block, bytes)
+            yield block
+
     return ResolveResult(
         UnixFSFile(
             unix_fs,
@@ -321,7 +379,7 @@ async def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[st
             cid,
             depth,
             unix_fs.file_size(),
-            content
+            validate_file_results(content)
         ),
         next_result
     )
@@ -333,5 +391,5 @@ _CONTENT_RESOLVERS: Mapping[int, Resolver] = {
     multicodec.get('identity').code: resolve_identity
 }
 
-async def resolve(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
-    return await _CONTENT_RESOLVERS[cid.codec.code](cid, name, path, to_resolve, depth, block_from_encoded_cid)    
+def resolve(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_store: BlockStore) -> Awaitable[ResolveResult]:
+    return _CONTENT_RESOLVERS[cid.codec.code](cid, name, path, to_resolve, depth, block_store)    

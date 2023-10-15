@@ -1,7 +1,7 @@
 import os
 
-from py_unix_fs_exporter.ipfs_unix_fs.unix_fs import UnixFS, MTime, FSType, DEFAULT_FILE_MODE, DEFAULT_DIRECTORY_MODE, UnixFSFormatException
-from py_unix_fs_exporter.ipfs_unix_fs.unixfs_pb2 import Data as PBData
+from unix_fs_exporter.ipfs_unix_fs.unix_fs import UnixFS, MTime, FSType, DEFAULT_FILE_MODE, DEFAULT_DIRECTORY_MODE, UnixFSFormatException
+from unix_fs_exporter.ipfs_unix_fs.unixfs_pb2 import Data as PBData
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 fixtures_path = os.path.join(dir_path, 'fixtures/unix_fs')

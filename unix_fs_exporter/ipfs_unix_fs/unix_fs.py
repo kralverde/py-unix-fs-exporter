@@ -22,7 +22,7 @@ class FSType(Enum):
     HAMTSHARD = 5
 
     @classmethod
-    def from_string(cls, s):
+    def from_string(cls, s: str) -> 'FSType':
         if s == 'raw':
             return cls.RAW
         if s == 'directory':
@@ -44,8 +44,8 @@ DEFAULT_DIRECTORY_MODE = int('0755', base=8)
 class UnixFS:
     def __init__(self, *,
                  fs_type: FSType = FSType.RAW,
-                 data: bytes = None,
-                 block_sizes: List[int] = None, 
+                 data: Optional[bytes] = None,
+                 block_sizes: Optional[List[int]] = None, 
                  hash_type: int = 0,
                  fanout: int = 0,
                  m_time: MTime = MTime(0, 0),
@@ -57,21 +57,21 @@ class UnixFS:
         self.fanout = fanout
         self.m_time = m_time
         self._original_mode = None 
-        self.mode = mode
+        self.mode = mode  # type: ignore
 
     @property
-    def mode(self):
+    def mode(self) -> int:
         return self._mode
     
     @mode.setter
-    def mode(self, m):
+    def mode(self, m: Optional[int]) -> None:
         if m is None:
             self._mode = DEFAULT_DIRECTORY_MODE if self.is_dir() else DEFAULT_FILE_MODE
         else:
             self._mode = m & 0xfff
 
     def __repr__(self) -> str:
-        return f'UnixFS({self.fs_type}, {self.data}, {self.block_sizes}, {self.hash_type}, {self.fanout}, {self.m_time}, {self.mode} ({self._original_mode}))'
+        return f'UnixFS({self.fs_type}, {self.data!r}, {self.block_sizes}, {self.hash_type}, {self.fanout}, {self.m_time}, {self.mode} ({self._original_mode}))'
 
     def is_dir(self) -> bool:
         return self.fs_type in DIR_TYPES
@@ -81,10 +81,10 @@ class UnixFS:
         total = sum(s for s in self.block_sizes)
         return len(self.data) + total
     
-    def add_block_size(self, size: int):
+    def add_block_size(self, size: int) -> None:
         self.block_sizes.append(size)
 
-    def remove_block_size(self, index: int):
+    def remove_block_size(self, index: int) -> None:
         self.block_sizes.pop(index)
 
     @classmethod
@@ -134,4 +134,4 @@ class UnixFS:
         if self.file_size() != pb2._DATA.fields_by_name['filesize'].default_value:
             message.filesize = self.file_size()
 
-        return message.SerializeToString()
+        return message.SerializeToString()  # type: ignore

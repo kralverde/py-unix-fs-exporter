@@ -52,14 +52,14 @@ async def raw_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth:
     assert unix_fs.fs_type == FSType.RAW
     yield unix_fs.data
 
-async def directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_store: 'BlockStore', resolver: 'Resolver') -> AsyncIterator['Exportable']:
+async def directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_store: 'BlockStore', resolver: 'Resolver') -> AsyncIterator['ExportedContent']:
     assert unix_fs.fs_type == FSType.DIRECTORY
     for link in node.links:
         link_path = f'{path}/{link.name}'
         result = await resolver(link.cid, link.name, link_path, [], depth + 1, block_store)
         yield result.entry
 
-async def _list_hamt_directory(node: PBNode, path: str, depth: int, block_store: 'BlockStore', resolver: 'Resolver') -> AsyncIterator['Exportable']:
+async def _list_hamt_directory(node: PBNode, path: str, depth: int, block_store: 'BlockStore', resolver: 'Resolver') -> AsyncIterator['ExportedContent']:
     unix_fs = UnixFS.unmarshal(node.data)
     if unix_fs.fanout == 0:
         raise ContentExtractionException('no fanout for hamt directory')
@@ -72,15 +72,18 @@ async def _list_hamt_directory(node: PBNode, path: str, depth: int, block_store:
         else:
             block = await block_store.get_block(link.cid)
             node = PBNode.decode(block)
-            async for exportable in _list_hamt_directory(node, path, depth, block_store):
+            async for exportable in _list_hamt_directory(node, path, depth, block_store, resolver):
                 yield exportable
 
-def hamt_sharded_directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_store: 'BlockStore', resolver: 'Resolver') -> AsyncIterator['Exportable']:
+async def hamt_sharded_directory_content(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_store: 'BlockStore', resolver: 'Resolver') -> AsyncIterator['ExportedContent']:
     assert unix_fs.fs_type == FSType.HAMTSHARD
-    return _list_hamt_directory(node, path, depth, block_store, resolver)
+    async for content in _list_hamt_directory(node, path, depth, block_store, resolver):
+        yield content
 
-def _null(*args):
-    return []
+
+async def _null(cid: CID, node: PBNode, unix_fs: UnixFS, path: str, depth: int, block_store: 'BlockStore', resolver: 'Resolver') -> AsyncIterator['ExportedContent']:
+    for _ in ():
+        yield _
 
 ExportedContent = Union[bytes, 'Exportable']
 ContentExporter = Callable[[CID, PBNode, UnixFS, str, int, 'BlockStore', 'Resolver'], AsyncIterator[ExportedContent]]

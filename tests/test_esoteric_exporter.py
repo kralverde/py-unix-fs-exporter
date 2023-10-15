@@ -3,11 +3,11 @@ from random import randint
 
 from multiformats import CID, multicodec, multihash
 
-from py_unix_fs_exporter.exporter import exporter, ExportableType
-from py_unix_fs_exporter.resolvers import BlockStore
-from py_unix_fs_exporter.content import ContentExtractionException
-from py_unix_fs_exporter.ipfs_dag_pb.dag_pb import PBNode, PBLink
-from py_unix_fs_exporter.ipfs_unix_fs.unix_fs import UnixFS, FSType
+from unix_fs_exporter.exporter import exporter, ExportableType
+from unix_fs_exporter.resolvers import BlockStore
+from unix_fs_exporter.content import ContentExtractionException
+from unix_fs_exporter.ipfs_dag_pb.dag_pb import PBNode, PBLink
+from unix_fs_exporter.ipfs_unix_fs.unix_fs import UnixFS, FSType
 
 # For python3.7
 def randbytes(l: int) -> bytes:

@@ -1,16 +1,16 @@
-from typing import Union, Sequence, Tuple, AsyncIterable
+from typing import Union, Sequence, Tuple, AsyncIterable, Any
 
 import re
 
 from multiformats import CID
 
 from .content import ExportedContent
-from .resolvers import resolve, UnixFSDirectory, ExportableType, BlockStore
+from .resolvers import resolve, UnixFSDirectory, ExportableType, BlockStore, Exportable
 
 class ExporterException(Exception): pass
 
 def _to_path_components(path: str) -> Sequence[str]:
-    return filter(bool, re.findall(r'(?:[^\\^/]|\\\/)+', ''.join(path.split())))
+    return [x for x in filter(bool, re.findall(r'(?:[^\\^/]|\\\/)+', ''.join(path.split())))]
 
 def _cid_and_rest(path: Union[str, bytes, CID]) -> Tuple[CID, Sequence[str]]:
     if isinstance(path, bytes):
@@ -30,7 +30,7 @@ def _cid_and_rest(path: Union[str, bytes, CID]) -> Tuple[CID, Sequence[str]]:
     output = _to_path_components(path)
     return CID.decode(output[0]), output[1:]
 
-async def _walk_path(path: Union[str, CID], block_store: BlockStore):
+async def _walk_path(path: Union[str, CID], block_store: BlockStore) -> AsyncIterable[Exportable[Any]]:
     cid, to_resolve = _cid_and_rest(path)
     name = cid.encode()
     entry_path = name
@@ -46,7 +46,7 @@ async def _walk_path(path: Union[str, CID], block_store: BlockStore):
         name = result.next.name
         entry_path = result.next.path
 
-async def exporter(path: Union[str, CID], block_store: BlockStore):
+async def exporter(path: Union[str, CID], block_store: BlockStore) -> Exportable[Any]:
     async for result in _walk_path(path, block_store):
         pass
     return result
@@ -57,6 +57,7 @@ async def _recurse(node: UnixFSDirectory) -> AsyncIterable[ExportedContent]:
         if isinstance(file, bytes):
             continue
         if file.exportable_type == ExportableType.DIRECTORY:
+            assert isinstance(file, UnixFSDirectory)
             async for content in _recurse(file):
                 yield content
 
@@ -64,5 +65,6 @@ async def recursive_exporter(path: Union[str, CID], block_store: BlockStore) -> 
     node = await exporter(path, block_store)
     yield node
     if node.exportable_type == ExportableType.DIRECTORY:
+        assert isinstance(node, UnixFSDirectory)
         async for content in _recurse(node):
             yield content

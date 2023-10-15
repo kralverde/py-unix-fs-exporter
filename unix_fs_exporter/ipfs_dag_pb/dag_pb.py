@@ -50,4 +50,5 @@ class PBNode:
                 if bytes(link.cid) != pb2._PBLINK.fields_by_name['Hash'].default_value:
                     pb_link.Hash = bytes(link.cid)
                 node.Links.append(pb_link)
-        return node.SerializeToString()
+
+        return node.SerializeToString() # type: ignore
