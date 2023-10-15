@@ -1,10 +1,10 @@
-from typing import Union, Sequence, Mapping, Tuple
+from typing import Union, Sequence, Mapping, Tuple, Iterable
 
 import re
 
 from multiformats import CID
 
-from .resolvers import resolve, UnixFSDirectory, ExportableType
+from .resolvers import resolve, UnixFSDirectory, ExportableType, Exportable
 
 class ExporterException(Exception): pass
 
@@ -49,7 +49,7 @@ def exporter(path: Union[str, CID], block_from_encoded_cid: Mapping[str, bytes])
     *_, result = _walk_path(path, block_from_encoded_cid)        
     return result
 
-def _recurse(node: UnixFSDirectory):
+def _recurse(node: UnixFSDirectory) -> Iterable[Exportable]:
     for file in node.content:
         yield file
         if isinstance(file, bytes):
@@ -57,7 +57,7 @@ def _recurse(node: UnixFSDirectory):
         if file.exportable_type == ExportableType.DIRECTORY:
             yield from _recurse(file)
 
-def recursive_exporter(path: Union[str, CID], block_from_encoded_cid: Mapping[str, bytes]):
+def recursive_exporter(path: Union[str, CID], block_from_encoded_cid: Mapping[str, bytes]) -> Iterable[Exportable]:
     node = exporter(path, block_from_encoded_cid)
     yield node
     if node.exportable_type == ExportableType.DIRECTORY:
