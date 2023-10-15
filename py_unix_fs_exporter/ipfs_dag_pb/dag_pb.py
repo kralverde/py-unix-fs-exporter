@@ -2,32 +2,52 @@ import attr
 
 from typing import Optional, Sequence
 
+from google.protobuf.message import DecodeError
 from multiformats import CID
 
 from . import dag_pb_pb2 as pb2
 
 class DAGPBFormatException(Exception): pass
 
-@attr.s(slots=True, frozen=True)
+@attr.define(slots=True, frozen=True)
 class PBLink:
-    name = attr.ib(type=Optional[str])
-    t_size = attr.ib(type=Optional[int])
-    hash = attr.ib(type=CID)
+    name: str
+    t_size: int
+    cid: CID
 
-@attr.s(slots=True, frozen=True)
+@attr.define(slots=True, frozen=True)
 class PBNode:
-    data = attr.ib(type=Optional[bytes])
-    links = attr.ib(type=Sequence[PBLink])
+    data: bytes
+    links: Sequence[PBLink]
 
-def decode_pbnode(raw: bytes) -> PBNode:
-    raw_node = pb2.PBNode()
-    raw_node.ParseFromString(raw)
+    @classmethod
+    def decode(cls, raw: bytes) -> 'PBNode':
+        raw_node = pb2.PBNode()
+        try:
+            raw_node.ParseFromString(raw)
+        except DecodeError:
+            raise DAGPBFormatException()
+        return PBNode(
+            data=raw_node.Data,
+            links=[PBLink(
+                name=link.Name,
+                t_size=link.Tsize,
+                cid=CID.decode(link.Hash)
+            ) for link in raw_node.Links]
+        )
 
-    return PBNode(
-        data=raw_node.Data,
-        links=[PBLink(
-            name=link.Name,
-            t_size=link.Tsize,
-            hash=CID.decode(link.Hash)
-        ) for link in raw_node.Links]
-    )
+    def encode(self) -> bytes:
+        node = pb2.PBNode()
+        if self.data != pb2._PBNODE.fields_by_name['Data'].default_value:
+            node.Data = self.data
+        if self.links != pb2._PBNODE.fields_by_name['Links'].default_value:
+            for link in self.links:
+                pb_link = pb2.PBLink()
+                if link.name != pb2._PBLINK.fields_by_name['Name'].default_value:
+                    pb_link.Name = link.name
+                if link.t_size != pb2._PBLINK.fields_by_name['Tsize'].default_value:
+                    pb_link.Tsize = link.t_size
+                if bytes(link.cid) != pb2._PBLINK.fields_by_name['Hash'].default_value:
+                    pb_link.Hash = bytes(link.cid)
+                node.Links.append(pb_link)
+        return node.SerializeToString()

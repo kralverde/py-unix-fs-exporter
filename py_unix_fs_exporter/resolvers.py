@@ -3,22 +3,21 @@ import attr
 from abc import ABC
 from enum import Enum, auto
 from math import log2
-from typing import Generic, TypeVar, Sequence, Union, Optional, Mapping, Callable
+from typing import Generic, TypeVar, Sequence, Union, Optional, Mapping, Callable, Iterable
 
 import dag_cbor
-import mmh3
-from multiformats import CID, multicodec
+from multiformats import CID, multicodec, multihash
 
-from hamt_sharding import create_HAMT
-from hamt_sharding.buckets import Bucket, BucketPosition
+from hamt_sharding import HAMTBucket
+from hamt_sharding.buckets import HAMTBucketPosition
 
-from .content import CONTENT_EXPORTERS
-from .ipfs_unix_fs.unix_fs import UnixFS, FSType
-from .ipfs_dag_pb.dag_pb import PBNode, PBLink, decode_pbnode
+from .content import CONTENT_EXPORTERS, ExportedContent
+from .ipfs_unix_fs.unix_fs import UnixFS, FSType, UnixFSFormatException
+from .ipfs_dag_pb.dag_pb import PBNode, PBLink, DAGPBFormatException
 
 T = TypeVar('T')
 
-class IPFSUnixFSResolveException(Exception): pass
+class ResolveException(Exception): pass
 
 class ExportableType(Enum):
     FILE = auto()
@@ -36,7 +35,7 @@ class Exportable(ABC, Generic[T]):
                  depth: int,
                  size: int,
                  node: Union[PBNode, bytes],
-                 content: Sequence[T]):
+                 content: Iterable[T]):
         self.exportable_type = exportable_type
         self.name = name
         self.path = path
@@ -46,7 +45,7 @@ class Exportable(ABC, Generic[T]):
         self.content = content
         self.node = node
     
-class FSExportable(Exportable[T], Generic[T]):
+class FSExportable(Exportable[T]):
     def __init__(self, exportable_type: ExportableType,
                  unix_fs: UnixFS,
                  node: PBNode,
@@ -59,12 +58,12 @@ class UnixFSFile(FSExportable[bytes]):
                  unix_fs, node, name, path, cid, depth, size, content):
         FSExportable.__init__(self, ExportableType.FILE, unix_fs, node, name, path, cid, depth, size, content)
 
-class UnixFSDirectory(FSExportable[Union[Exportable, bytes]]):
+class UnixFSDirectory(FSExportable[ExportedContent]):
     def __init__(self,
                  unix_fs, node, name, path, cid, depth, size, content):
         FSExportable.__init__(self, ExportableType.DIRECTORY, unix_fs, node, name, path, cid, depth, size, content)
 
-class BinaryExportable(FSExportable[T], Generic[T]):
+class BinaryExportable(FSExportable[T]):
     def __init__(self, exportable_type: ExportableType,
                  node: bytes,
                  name, path, cid, depth, size, content):
@@ -101,8 +100,8 @@ Resolver = Callable[[CID, str, str, Sequence[str], int, Mapping[str, bytes]], Re
 
 def resolve_raw(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
     if len(to_resolve) > 0:
-        raise IPFSUnixFSResolveException(f'no link named {path} found in raw node {cid}')
-    block = block_from_encoded_cid[cid.encode()]
+        raise ResolveException(f'no link named {path} found in raw node {cid}')
+    block = block_from_encoded_cid[bytes(cid)]
     return ResolveResult(
         entry=RawNode(
             node=block,
@@ -118,8 +117,8 @@ def resolve_raw(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth
         
 def resolve_identity(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
     if len(to_resolve) > 0:
-        raise IPFSUnixFSResolveException(f'no link named {path} found in identity node {cid}')
-    block = block_from_encoded_cid[cid.encode()]
+        raise ResolveException(f'no link named {path} found in identity node {cid}')
+    block = block_from_encoded_cid[bytes(cid)]
     return ResolveResult(
         entry=IdentityNode(
             node=block,
@@ -134,7 +133,7 @@ def resolve_identity(cid: CID, name: str, path: str, to_resolve: Sequence[str], 
     )
 
 def resolve_dag_cbor(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
-    block = block_from_encoded_cid[cid.encode()]
+    block = block_from_encoded_cid[bytes(cid)]
     obj = dag_cbor.decode(block)
     sub_obj = obj
     sub_path = path
@@ -164,7 +163,7 @@ def resolve_dag_cbor(cid: CID, name: str, path: str, to_resolve: Sequence[str], 
                 )
             sub_obj = sub_obj[prop]
         else:
-            raise IPFSUnixFSResolveException(f'no property named {prop} in cbor node {cid}')
+            raise ResolveException(f'no property named {prop} in cbor node {cid}')
         
     return ResolveResult(
         entry=ObjectNode(
@@ -182,29 +181,25 @@ def resolve_dag_cbor(cid: CID, name: str, path: str, to_resolve: Sequence[str], 
 @attr.define(slots=True)
 class _ShardTraversalContext:
     hamt_depth: int
-    root_bucket: Bucket[bool]
-    last_bucket: Bucket[bool]
+    root_bucket: HAMTBucket[str, bool]
+    last_bucket: HAMTBucket[str, bool]
 
-def _hash_fn(buf: bytes):
-    return mmh3.hash128(buf)[:8][::-1]
-
-def _pad_length(bucket: Bucket):
+def _pad_length(bucket: HAMTBucket[str, bool]):
     return len(hex(bucket.table_size - 1)[2:])
 
-def _add_links_to_hamt_bucket(links: Sequence[PBLink], bucket: Bucket[bool], root_bucket: Bucket[bool]):
+def _add_links_to_hamt_bucket(links: Sequence[PBLink], bucket: HAMTBucket[str, bool], root_bucket: HAMTBucket[str, bool]):
     pad_length = _pad_length(bucket)
     for link in links:
-        assert link.name
         if len(link.name) == pad_length:
             pos = int(link.name, 16)
-            bucket._put_object_at(pos, Bucket(root_bucket._bits, root_bucket._hash, None))
+            bucket._put_object_at(pos, HAMTBucket[str, bool](root_bucket._bits, root_bucket._infinite_wrapper))
         else:
             root_bucket[link.name[:2]] = True
 
 def _to_prefix(position: int, pad_length: int) -> str:
     return hex(position)[2:].upper().zfill(pad_length)[:pad_length]
 
-def _to_bucket_path(position: BucketPosition[bool]) -> Sequence[Bucket[bool]]:
+def _to_bucket_path(position: HAMTBucketPosition[str, bool]) -> Sequence[HAMTBucket[str, bool]]:
     bucket = position.bucket
     path = []
     while bucket._parent is not None:
@@ -213,14 +208,29 @@ def _to_bucket_path(position: BucketPosition[bool]) -> Sequence[Bucket[bool]]:
     path.append(bucket)
     return path[::-1]
 
-def _find_shard_cid(node: PBNode, name: str, block_from_encoded_cid: Mapping[str, bytes], context: Optional[_ShardTraversalContext] = None) -> Optional[CID]:
+def _find_shard_cid(node: PBNode, name: str, block_from_encoded_cid: Mapping[str, bytes], context: Optional[_ShardTraversalContext] = None) -> CID:
     if context is None:
-        assert node.data
+        if not node.data:
+            raise ResolveException('no data in shard node')
         unix_fs = UnixFS.unmarshal(node.data)
-        assert unix_fs.fs_type == FSType.HAMTSHARD
-        assert unix_fs.fanout
+        if unix_fs.fs_type != FSType.HAMTSHARD:
+            raise ResolveException(f'not an HAMT sharded directory (is {unix_fs.fs_type})')
+        if unix_fs.fanout == 0:
+            raise ResolveException('not a valid fanout')
 
-        root_bucket: Bucket[bool] = create_HAMT(_hash_fn, log2(unix_fs.fanout))
+        def _hash_fn(buf: bytes):
+            # TODO: Remove this once multihash gets fixed
+            if unix_fs.hash_type == 0x22:
+                from multiformats.multihash._hashfuns.murmur3 import _murmur3
+                return _murmur3('x64', 64)(buf)
+            mh = multihash.get(code=unix_fs.hash_type)
+            assert mh
+            return mh.digest(buf)
+
+        log_2 = log2(unix_fs.fanout)
+        if not log_2.is_integer():
+            raise ResolveException(f'fanout should be an exponent of 2 (is {unix_fs.fanout})')
+        root_bucket = HAMTBucket[str, bool].create_hamt(_hash_fn, int(log_2))
         context = _ShardTraversalContext(1, root_bucket, root_bucket)
 
     pad_length = _pad_length(context.last_bucket)
@@ -233,7 +243,6 @@ def _find_shard_cid(node: PBNode, name: str, block_from_encoded_cid: Mapping[str
         prefix = _to_prefix(context.last_bucket._pos_at_parent, pad_length)
 
     def predicate(link: PBLink):
-        if link.name is None: return False
         entry_prefix = link.name[:pad_length]
         entry_name = link.name[pad_length:]
         if entry_prefix != prefix:
@@ -244,18 +253,17 @@ def _find_shard_cid(node: PBNode, name: str, block_from_encoded_cid: Mapping[str
 
     link = next(filter(predicate, node.links), None)
     if link is None: return None
-    if link.name is not None and link.name[pad_length:] == name:
-        return link.hash
+    if link.name[pad_length:] == name:
+        return link.cid
     
     context.hamt_depth += 1
-    block = block_from_encoded_cid[link.hash.encode()]
-    decode_pbnode(block)
+    block = block_from_encoded_cid[bytes(link.cid)]
+    node = PBNode.decode(block)
     return _find_shard_cid(node, name, block_from_encoded_cid, context)
 
 def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
-    block = block_from_encoded_cid[cid.encode()]
-    node = decode_pbnode(block)
-    assert node.data
+    block = block_from_encoded_cid[bytes(cid)]
+    node = PBNode.decode(block)
 
     name = name or cid.encode()
     path = path or name
@@ -270,8 +278,9 @@ def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[str], de
             link_cid = None
             link = next(filter(lambda x: x.name == name, node.links), None)
             if link_cid is not None:
-                link_cid = link.hash
-        assert link_cid
+                link_cid = link.cid
+        if link_cid is None:
+            raise ResolveException('file does not exist')
 
         next_name = to_resolve[0]
         next_path = f'{path}/{next_name}'
@@ -284,7 +293,6 @@ def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[str], de
         )
 
     content = CONTENT_EXPORTERS[unix_fs.fs_type](cid, node, unix_fs, path, depth, block_from_encoded_cid, resolve)
-    assert content is not None
     if unix_fs.is_dir():
         return ResolveResult(
             UnixFSDirectory(
@@ -313,12 +321,12 @@ def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[str], de
         next_result
     )
 
-CONTENT_RESOLVERS = dict[int, Resolver]({
+CONTENT_RESOLVERS: Mapping[int, Resolver] = {
     multicodec.get('dag-pb').code: resolve_dag_pb,
     multicodec.get('raw').code: resolve_raw,
     multicodec.get('dag-cbor').code: resolve_dag_cbor,
     multicodec.get('identity').code: resolve_identity
-})
+}
 
 def resolve(cid: CID, name: str, path: str, to_resolve: Sequence[str], depth: int, block_from_encoded_cid: Mapping[str, bytes]) -> ResolveResult:
     resolver = CONTENT_RESOLVERS[cid.codec.code]
