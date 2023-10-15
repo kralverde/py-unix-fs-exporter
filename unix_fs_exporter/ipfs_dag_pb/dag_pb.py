@@ -1,8 +1,8 @@
 import attr
 
-from typing import Optional, Sequence
+from typing import Sequence
 
-from google.protobuf.message import DecodeError
+from google.protobuf.message import DecodeError  # type: ignore
 from multiformats import CID
 
 from . import dag_pb_pb2 as pb2
