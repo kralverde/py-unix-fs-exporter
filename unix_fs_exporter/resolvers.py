@@ -12,8 +12,8 @@ from hamt_sharding import HAMTBucket
 from hamt_sharding.buckets import HAMTBucketPosition
 
 from .content import _CONTENT_EXPORTERS, ExportedContent
-from .ipfs_unix_fs.unix_fs import UnixFS, FSType, UnixFSFormatException
-from .ipfs_dag_pb.dag_pb import PBNode, PBLink, DAGPBFormatException
+from .ipfs_unix_fs.unix_fs import UnixFS, FSType
+from .ipfs_dag_pb.dag_pb import PBNode, PBLink
 
 T = TypeVar('T')
 
