@@ -329,10 +329,10 @@ async def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[st
     next_result = None
 
     if len(to_resolve) > 0:
+        link_cid = None
         if unix_fs.fs_type == FSType.HAMTSHARD:
             link_cid = await _find_shard_cid(node, to_resolve[0], block_store)
         else:
-            link_cid = None
             link = next(filter(lambda x: x.name == name, node.links), None)
             if link_cid is not None:
                 link_cid = link.cid
