@@ -34,3 +34,15 @@ Given a block store and a root cid, decode the underlying data.
 ...
 >>> asyncio.run(test())
 b'some data'
+
+Recursively iterate through a directory.
+
+>>> from unix_fs_exporter import recursive_export, UnixFSFile
+>>> # Creation of the blockstore is an exercise left to the reader
+>>> async def test():
+...     entries = recursive_export('bafybeifpaez32hlrz5tmr7scndxtjgw3auuloyuyxblynqmjw5saapewmu', block_store)
+...     async for entry in entries:
+...         assert isinstance(entry, UnixFSFile)
+...         async for chunk in entry.content:
+...             assert isinstance(chunk, bytes)
+>>> asyncio.run(test())
