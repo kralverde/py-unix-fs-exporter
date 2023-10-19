@@ -28,16 +28,8 @@ async def _iterable_to_async_iterable(x: Sequence[T]) -> AsyncIterable[T]:
     for y in x:
         yield y
 
-class ExportableType(Enum):
-    FILE = auto()
-    DIRECTORY = auto()
-    OBJECT = auto()
-    RAW = auto()
-    IDENTITY = auto()
-
 class Exportable(ABC, Generic[T]):
     def __init__(self, 
-                 exportable_type: ExportableType,
                  name: str,
                  path: str,
                  cid: CID,
@@ -45,7 +37,6 @@ class Exportable(ABC, Generic[T]):
                  size: int,
                  node: Union[PBNode, bytes],
                  content: AsyncIterable[T]):
-        self.exportable_type = exportable_type
         self.name = name
         self.path = path
         self.cid = cid
@@ -55,7 +46,7 @@ class Exportable(ABC, Generic[T]):
         self.node = node
     
 class FSExportable(Exportable[T]):
-    def __init__(self, exportable_type: ExportableType,
+    def __init__(self,
                  unix_fs: UnixFS,
                  node: PBNode,
                  name: str,
@@ -64,7 +55,7 @@ class FSExportable(Exportable[T]):
                  depth: int,
                  size: int,
                  content: AsyncIterable[T]):
-        Exportable.__init__(self, exportable_type, name, path, cid, depth, size, node, content)
+        Exportable.__init__(self, name, path, cid, depth, size, node, content)
         self.unix_fs = unix_fs
 
 class UnixFSFile(FSExportable[bytes]):
@@ -77,9 +68,9 @@ class UnixFSFile(FSExportable[bytes]):
                  depth: int,
                  size: int,
                  content: AsyncIterable[bytes]):
-        FSExportable.__init__(self, ExportableType.FILE, unix_fs, node, name, path, cid, depth, size, content)
+        FSExportable.__init__(self, unix_fs, node, name, path, cid, depth, size, content)
 
-class UnixFSDirectory(FSExportable[ExportedContent]):
+class UnixFSDirectory(FSExportable[Exportable[Any]]):
     def __init__(self,
                  unix_fs: UnixFS,
                  node: PBNode,
@@ -88,11 +79,11 @@ class UnixFSDirectory(FSExportable[ExportedContent]):
                  cid: CID,
                  depth: int,
                  size: int,
-                 content: AsyncIterable[ExportedContent]):
-        FSExportable.__init__(self, ExportableType.DIRECTORY, unix_fs, node, name, path, cid, depth, size, content)
+                 content: AsyncIterable[Exportable[Any]]):
+        FSExportable.__init__(self, unix_fs, node, name, path, cid, depth, size, content)
 
 class BinaryExportable(FSExportable[T]):
-    def __init__(self, exportable_type: ExportableType,
+    def __init__(self,
                  node: bytes,
                  name: str,
                  path: str,
@@ -100,7 +91,7 @@ class BinaryExportable(FSExportable[T]):
                  depth: int,
                  size: int,
                  content: AsyncIterable[T]):
-        Exportable.__init__(self, exportable_type, name, path, cid, depth, size, node, content)
+        Exportable.__init__(self, name, path, cid, depth, size, node, content)
 
 class ObjectNode(BinaryExportable[object]):
     def __init__(self,
@@ -111,7 +102,7 @@ class ObjectNode(BinaryExportable[object]):
                  depth: int,
                  size: int,
                  content: AsyncIterable[object]):
-        BinaryExportable.__init__(self, ExportableType.OBJECT, node, name, path, cid, depth, size, content)
+        BinaryExportable.__init__(self, node, name, path, cid, depth, size, content)
 
 class RawNode(BinaryExportable[bytes]):
     def __init__(self,
@@ -122,7 +113,7 @@ class RawNode(BinaryExportable[bytes]):
                  depth: int,
                  size: int,
                  content: AsyncIterable[bytes]):
-        BinaryExportable.__init__(self, ExportableType.RAW, node, name, path, cid, depth, size, content)
+        BinaryExportable.__init__(self, node, name, path, cid, depth, size, content)
 
 class IdentityNode(BinaryExportable[bytes]):
     def __init__(self,
@@ -133,7 +124,7 @@ class IdentityNode(BinaryExportable[bytes]):
                  depth: int,
                  size: int,
                  content: AsyncIterable[bytes]):
-        BinaryExportable.__init__(self, ExportableType.IDENTITY, node, name, path, cid, depth, size, content)
+        BinaryExportable.__init__(self, node, name, path, cid, depth, size, content)
 
 @attr.define(slots=True)
 class NextResult:
@@ -334,7 +325,7 @@ async def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[st
             link_cid = await _find_shard_cid(node, to_resolve[0], block_store)
         else:
             link = next(filter(lambda x: x.name == name, node.links), None)
-            if link_cid is not None:
+            if link is not None:
                 link_cid = link.cid
         if link_cid is None:
             raise ResolveException('file does not exist')
@@ -351,6 +342,12 @@ async def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[st
 
     content = _CONTENT_EXPORTERS[unix_fs.fs_type](cid, node, unix_fs, path, depth, block_store, resolve)
     if unix_fs.is_dir():
+
+        async def validate_directory_results(content: AsyncIterable[ExportedContent]) -> AsyncIterable[Exportable[Any]]:
+            async for block in content:
+                assert isinstance(block, Exportable)
+                yield block
+
         return ResolveResult(
             UnixFSDirectory(
                 unix_fs,
@@ -360,7 +357,7 @@ async def resolve_dag_pb(cid: CID, name: str, path: str, to_resolve: Sequence[st
                 cid,
                 depth,
                 unix_fs.file_size(),
-                content
+                validate_directory_results(content)
             ),
             next_result
         )

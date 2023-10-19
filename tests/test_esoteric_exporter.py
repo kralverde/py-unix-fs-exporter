@@ -3,8 +3,8 @@ from random import randint
 
 from multiformats import CID, multicodec, multihash
 
-from unix_fs_exporter.exporter import exporter, ExportableType
-from unix_fs_exporter.resolvers import BlockStore
+from unix_fs_exporter.exporter import exporter
+from unix_fs_exporter.resolvers import BlockStore, UnixFSFile
 from unix_fs_exporter.content import ContentExtractionException
 from unix_fs_exporter.ipfs_dag_pb.dag_pb import PBNode, PBLink
 from unix_fs_exporter.ipfs_unix_fs.unix_fs import UnixFS, FSType
@@ -138,7 +138,7 @@ def test_unbalanced_dag():
     root_cid = store_block(root_buf, multicodec.get('dag-pb').code)
 
     exported = asyncio.run(exporter(root_cid, bs))
-    assert exported.exportable_type == ExportableType.FILE
+    assert isinstance(exported, UnixFSFile)
     async def test():
         chunks = b''
         async for content in exported.content:
@@ -180,7 +180,7 @@ def test_deep_dag():
         child_cid = store_block(buf, multicodec.get('dag-pb').code)
 
     exported = asyncio.run(exporter(child_cid, bs))
-    assert exported.exportable_type == ExportableType.FILE
+    assert isinstance(exported, UnixFSFile)
     async def test():
         chunks = b''
         async for content in exported.content:
@@ -239,7 +239,7 @@ def test_error_on_too_large_block_sizes():
     root_cid = store_block(root_buf, multicodec.get('dag-pb').code)
     exported = asyncio.run(exporter(root_cid, bs))
 
-    assert exported.exportable_type == ExportableType.FILE
+    assert isinstance(exported, UnixFSFile)
     async def iter_all():
         async for _ in exported.content:
             pass
@@ -301,7 +301,7 @@ def test_error_on_too_small_block_sizes():
     root_cid = store_block(root_buf, multicodec.get('dag-pb').code)
     exported = asyncio.run(exporter(root_cid, bs))
 
-    assert exported.exportable_type == ExportableType.FILE
+    assert isinstance(exported, UnixFSFile)
     async def iter_all():
         async for _ in exported.content:
             pass
@@ -364,7 +364,7 @@ def test_error_on_wrong_number_block_sizes():
     root_cid = store_block(root_buf, multicodec.get('dag-pb').code)
     exported = asyncio.run(exporter(root_cid, bs))
 
-    assert exported.exportable_type == ExportableType.FILE
+    assert isinstance(exported, UnixFSFile)
     async def iter_all():
         async for _ in exported.content:
             pass

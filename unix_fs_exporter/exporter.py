@@ -4,8 +4,7 @@ import re
 
 from multiformats import CID
 
-from .content import ExportedContent
-from .resolvers import resolve, UnixFSDirectory, ExportableType, BlockStore, Exportable
+from .resolvers import resolve, UnixFSDirectory, BlockStore, Exportable
 
 class ExporterException(Exception): pass
 
@@ -51,20 +50,18 @@ async def exporter(path: Union[str, CID], block_store: BlockStore) -> Exportable
         pass
     return result
 
-async def _recurse(node: UnixFSDirectory) -> AsyncIterable[ExportedContent]:
+async def _recurse(node: UnixFSDirectory) -> AsyncIterable[Exportable[Any]]:
     async for file in node.content:
         yield file
         if isinstance(file, bytes):
             continue
-        if file.exportable_type == ExportableType.DIRECTORY:
-            assert isinstance(file, UnixFSDirectory)
+        if isinstance(file, UnixFSDirectory):
             async for content in _recurse(file):
                 yield content
 
-async def recursive_exporter(path: Union[str, CID], block_store: BlockStore) -> AsyncIterable[ExportedContent]:
+async def recursive_exporter(path: Union[str, CID], block_store: BlockStore) -> AsyncIterable[Exportable[Any]]:
     node = await exporter(path, block_store)
     yield node
-    if node.exportable_type == ExportableType.DIRECTORY:
-        assert isinstance(node, UnixFSDirectory)
+    if isinstance(node, UnixFSDirectory):
         async for content in _recurse(node):
             yield content

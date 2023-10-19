@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Optional, List
 
 from . import unixfs_pb2 as pb2
-from google.protobuf.message import DecodeError  # type: ignore
+from google.protobuf.message import DecodeError
 
 class UnixFSFormatException(Exception): pass
 
