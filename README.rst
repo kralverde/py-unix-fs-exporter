@@ -5,10 +5,13 @@ Usage
 
 DAG-PB, Raw, DAG-CBOR, and Identity codecs are supported.
 
+```
 >>> from unix_fs_exporter import UnixFSFile, UnixFSDirectory, RawNode, ObjectNode, IdentityNode
+```
 
 Given a block store and a root cid, decode the underlying data.
 
+```
 >>> from unix_fs_exporter import RawNode, export, BlockStore
 >>> from multiformats import CID, multicodec, multihash
 ...
@@ -34,9 +37,11 @@ Given a block store and a root cid, decode the underlying data.
 ...
 >>> asyncio.run(test())
 b'some data'
+```
 
 Recursively iterate through a directory.
 
+```
 >>> from unix_fs_exporter import recursive_export, UnixFSFile
 >>> # Creation of the blockstore is an exercise left to the reader
 >>> async def test():
@@ -46,3 +51,4 @@ Recursively iterate through a directory.
 ...         async for chunk in entry.content:
 ...             assert isinstance(chunk, bytes)
 >>> asyncio.run(test())
+```
